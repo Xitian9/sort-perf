@@ -4,6 +4,6 @@ To get the amount of comparisons, add `comparisons` to the `bgroup` in `benchmar
 To run with allocations, add `+RTS -T`
 
 
-[GHC Merge Request](https://gitlab.haskell.org/ghc/ghc/-/issues/24280)
+[GHC Merge Request](https://gitlab.haskell.org/ghc/ghc/-/issues/26184)
 
-[CLC proposal](https://github.com/haskell/core-libraries-committee/issues/236)
+[CLC proposal](https://github.com/haskell/core-libraries-committee/issues/332)

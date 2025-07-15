@@ -1,5 +1,6 @@
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use sort" #-}
 module Main where
@@ -16,7 +17,7 @@ import Control.Monad (replicateM)
 import Control.DeepSeq (NFData)
 
 import Test.Tasty.Providers (TestTree, singleTest)
-import Data.List hiding (sort, sortBy)
+import Data.List hiding (sort, sortBy, sortOn)
 import Test.Tasty (testGroup)
 import Data.Semigroup (Arg(..))
 
@@ -27,20 +28,18 @@ import Test.Tasty.Patterns.Printer (printAwkExpr)
 baseline :: String
 baseline = "Old"
 
-type ComparisonFunction a = a -> a -> Ordering
+type ComparisonFunction a b = a -> b
+type SortOn a b = ComparisonFunction a b -> [a] -> [a]
 
 sizes :: [Int]
 -- sizes = replicate 20 3
 -- sizes = replicate 10 1_000_000
 sizes = [ 1, 5, 25, 100, 1000, 10_000, 100_000, 1_000_000 ]
 
-sorts :: Ord a => Show a => [(String, ComparisonFunction a -> [a] -> [a], [a] -> [a])]
-sorts = [
-  ("Old", Old.sortBy, Old.sort)
-  -- , ("3 Way Merge", N3.sortBy)
-  -- , ("3 Way Merge Optimization", N3O.sortBy)
-  -- , ("4 Way Merge", N4.sortBy, N4.sort)
-  , ("New", New.sortBy, New.sort)
+sorts :: Ord b => Show a => [(String, SortOn a b, SortOn a b)]
+sorts =
+  [ ("Old", Old.sortWith, Old.sortOn)
+  , ("New", New.sortWith, New.sortOn)
   ]
 
 main :: IO ()
@@ -55,7 +54,7 @@ testAll = testGroup "List tests"
   , makeTest "stability" (isStable @Int) ]
 
 makeTest :: (Ord a, Arbitrary b, Show b, Show a) => String -> (([a] -> [a]) -> [b] -> Property) -> TestTree
-makeTest name f = testGroup name $ map (\(n, _, sort) -> testProperty n $ f sort) sorts
+makeTest name f = testGroup name $ map (\(n, sortWith, _) -> testProperty n $ f (sortWith id)) sorts
 
 isStable :: Ord a => ([Arg a Int] -> [Arg a Int]) -> [a] -> Property
 isStable sort xs = let result = sort (zipWith Arg xs [0..])
@@ -83,28 +82,39 @@ benchmark :: Int -> IO Benchmark
 benchmark size = do
   _data <- randoms size
   let name = show size ++ " Elements"
-      randomSort  = bgroup' "sort" name _data id
-      minimumElem = bgroup' "min by sort" name _data (take 1)
-      comparisons = testGroup "comparisons" (makeComps _data)
-  pure $ bgroup name [randomSort, comparisons, minimumElem]
+      randomSort  = bgroup' "sortOn" name snd _data id
+      randomSort2  = bgroup'' "sortWith" name snd _data id
+      minimumElem = bgroup' "min by sortOn" name snd _data (take 1)
+      minimumElem2 = bgroup'' "min by sortWith" name snd _data (take 1)
+      -- comparisons = testGroup "comparisons" (makeComps _data)
+  pure $ bgroup name [randomSort, randomSort2, minimumElem, minimumElem2] -- comparisons
 
 
-bgroup' :: (NFData b, Ord a, Show a) => String -> String -> [a] -> ([a] -> b) -> Benchmark
-bgroup' str prev _data f = bgroup str $ makeBench [str, prev] _data f
+bgroup' :: (NFData b, Ord o, Show a) => String -> String -> (a -> o) -> [a] -> ([a] -> b) -> Benchmark
+bgroup' str prev proj _data f = bgroup str $ makeBenchSortOn [str, prev] proj _data f
 
-makeBench :: (NFData b, Ord a, Show a) => [String] -> [a] -> ([a] -> b) -> [Benchmark]
-makeBench strs _data f = forSorts (\name _ sort -> compBench strs name $ bench name (nf (f . sort) _data))
+bgroup'' :: (NFData b, Ord o, Show a) => String -> String -> (a -> o) -> [a] -> ([a] -> b) -> Benchmark
+bgroup'' str prev proj _data f = bgroup str $ makeBenchSortWith [str, prev] proj _data f
+
+makeBenchSortOn :: (NFData b, Ord o, Show a) => [String] -> (a -> o) -> [a] -> ([a] -> b) -> [Benchmark]
+makeBenchSortOn strs proj _data f = forSorts (\name _ sortOn -> compBench strs name $ bench name (nf (f . sortOn proj) _data))
+
+makeBenchSortWith :: (NFData b, Ord o, Show a) => [String] -> (a -> o) -> [a] -> ([a] -> b) -> [Benchmark]
+makeBenchSortWith strs proj _data f = forSorts (\name sortWith _ -> compBench strs name $ bench name (nf (f . sortWith proj) _data))
 
 makeComps :: (Ord a, NFData a, Typeable a, Show a) => [a] -> [TestTree]
-makeComps _data = forSorts (\name sortBy _ -> singleTest name (ComparisonTest _data sortBy))
+makeComps _data = forSorts (\name sortWith _ -> singleTest name (ComparisonTest _data sortWith id))
 
-forSorts :: Ord a => Show a => (String -> (ComparisonFunction a -> [a] -> [a]) -> ([a] -> [a]) -> b) -> [b]
-forSorts f = map (\(x, y, z) -> f x y z) sorts
+forSorts :: Ord o => Show a => (String -> SortOn a o -> SortOn a o -> b) -> [b]
+forSorts f = map (\(n, x, y) -> f n x y) sorts
 
 compBench :: [String] -> String -> Benchmark -> Benchmark
 compBench strs name
   | name == baseline = id
   | otherwise        = bcompare $ printAwkExpr (locateBenchmark $ baseline : strs)
 
-randoms :: Int -> IO [Int]
-randoms n = replicateM n $ randomRIO (0, 10_000)
+randoms :: Int -> IO [(Integer, Integer)]
+randoms n = do
+    fsts <- replicateM n $ randomRIO (0, 10_000)
+    snds <- replicateM n $ randomRIO (0, 10_000)
+    pure $ zip fsts snds

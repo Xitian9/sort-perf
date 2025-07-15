@@ -1,4 +1,6 @@
-module Sorts.Old (sort, sortBy) where
+module Sorts.Old (sort, sortBy, sortOn, sortWith) where
+
+import Data.Ord (comparing)
 
 {-# INLINEABLE sort #-}
 sort :: Ord a => [a] -> [a]
@@ -33,16 +35,16 @@ actualSort gt ns
                          in x : sequences bs
 
     merge_all [x] = x
-    merge_all xs  = merge_all (reduce xs)
+    merge_all xs  = merge_all (reduce_once xs)
 
-    reduce []            = []
-    reduce [a]           = [a]
-    reduce [a,b]         = [merge a b]
-    reduce [a,b,c]       = [merge3 a b c]
-    reduce [a,b,c,d,e]   = [merge a b, merge3 c d e]
-    reduce [a,b,c,d,e,f] = [merge3 a b c, merge3 d e f]
-    reduce (a:b:c:d:xs)  = let !x = merge4 a b c d
-                           in x : reduce xs
+    reduce_once []            = []
+    reduce_once [a]           = [a]
+    reduce_once [a,b]         = [merge a b]
+    reduce_once [a,b,c]       = [merge3 a b c]
+    reduce_once [a,b,c,d,e]   = [merge a b, merge3 c d e]
+    reduce_once [a,b,c,d,e,f] = [merge3 a b c, merge3 d e f]
+    reduce_once (a:b:c:d:xs)  = let !x = merge4 a b c d
+                                in x : reduce_once xs
 
     merge as@(a:as') bs@(b:bs')
       | a `gt` b  = b : merge as  bs'
@@ -90,3 +92,12 @@ actualSort gt ns
     merge4XY x as bs y cs ds
       | x `gt` y  = y : merge4X x as bs   cs ds
       | otherwise = x : merge4Y   as bs y cs ds
+
+{-# INLINEABLE sortOn #-}
+sortOn :: Ord b => (a -> b) -> [a] -> [a]
+sortOn f =
+  map snd . sortBy (comparing fst) . map (\x -> let y = f x in y `seq` (y, x))
+
+{-# INLINEABLE sortWith #-}
+sortWith :: Ord b => (a -> b) -> [a] -> [a]
+sortWith f = sortBy (comparing f)
